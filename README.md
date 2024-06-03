@@ -1,10 +1,18 @@
-# project_template
+# PatchCore
 
-This repository is template for Docker + Python(pyenv) + Poetry.
+This repository is one of the PatchCore implementations.
 
 ## 🛠Requirements
 
-- python = "^3.11"
+- python = "^3.10"
+- torch = "^2.3.0"
+- torchvision = "^0.18.0"
+- numpy = "^1.26.4"
+- scikit-learn = "^1.5.0"
+- opencv-python = "^4.9.0.80"
+- scipy = "^1.13.1"
+- pillow = "^10.3.0"
+- tqdm = "^4.66.4"
 
 ## 🌲Directory
 
@@ -32,7 +40,7 @@ project_template
 Clone this repository.
 
 ```bash
-git clone https://github.com/kargenk/project_template.git
+git clone https://github.com/kargenk/patchcore.git
 ```
 
 ### Using Poetry
@@ -48,7 +56,7 @@ curl -sSL https://install.python-poetry.org | python3 -
 Create environment with Poetry:
 
 ```bash
-cd project_template/src
+cd patchcore/src
 
 # Install the project dependencies and Activate
 poetry shell
@@ -89,9 +97,11 @@ Write usage of this repository
 
 ## 🚀Updates
 
-**yyyy.mm.dd**
+**2024.06.03**
 
-- updates
+- add kNearestNeighbor
+- add Random Projection and Greedy Sampling
+- add Memory Bank
 
 ## 📧Authors
 

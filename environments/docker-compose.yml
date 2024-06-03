@@ -1,0 +1,7 @@
+services:
+  ml:
+    build:
+      context: .
+      dockerfile: ./dockerfile
+    volumes:
+      - ../:/patchcore
