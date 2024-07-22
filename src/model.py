@@ -45,13 +45,11 @@ class PatchCore(nn.Module):
             embedding (torch.Tensor): torch.Size([N, 1536, H/8, W/8])
 
         Returns:
-            list[torch.Tensor]: torch.Size([1536], ...)
+            list[torch.Tensor]: torch.Size([1536])の特徴量がNHW個並んだリスト
         """
-        for i in range(embedding.shape[0]):
-            for j in range(embedding.shape[2]):
-                for k in range(embedding.shape[3]):
-                    self.memory_bank.append(embedding[i, :, j, k])
-        return self.memory_bank
+        # [N, C, H, W] => [N, H, W, C] => [N * H * W, C]
+        emb_flatten = embedding.permute(0, 2, 3, 1).reshape(-1, embedding.shape[1])
+        return emb_flatten
 
     def emb_concat(self, embeddings:list[torch.Tensor]) -> torch.Tensor:
         """2つの中間特徴量のうち、小さい方をバイリニア補間でアップサンプリングしてからチャネル方向に結合.
@@ -73,23 +71,20 @@ class PatchCore(nn.Module):
 
         Args:
             batch (object): 入力のバッチ
-
-        Returns:
-            _type_: _description_
         """
         x, _, _, _ = batch
         features = self.extractor(x)
 
-        # 位置に敏感にならないようにAdaptive Poolingで周囲と混ぜる（ぼかす）
+        # 位置に敏感にならないようにAverage Poolingで周囲と混ぜる（ぼかす）
         embeddings = []
+        avg_pool = nn.AvgPool2d(3, 1, 1)
         for _, feature in features.items():
-            m = nn.AvgPool2d(3, 1, 1)
-            embeddings.append(m(feature.cpu()))
+            embeddings.append(avg_pool(feature))
         # 特徴マップを結合
         embedding = self.emb_concat(embeddings)
         # 位置毎の特徴量を格納
-        embedding = self.reshape_embedding(embedding.detach().numpy())
-        self.memory_bank.extend(embedding)
+        embedding = self.reshape_embedding(embedding)
+        self.memory_bank.extend([emb for emb in embedding.tolist()])  # [N * H * W] * C
 
     def save_memories(self) -> None:
         """高速化のため、Random Projectionを使用して次元削減後、Greedy法を用いて特徴量のサンプリングを行って保存する.
