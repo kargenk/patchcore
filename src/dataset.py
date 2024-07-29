@@ -1,23 +1,21 @@
 from pathlib import Path
 
 import torch
-from PIL import Image
+from PIL import Image, ImageFile
 from torch.utils.data import Dataset
 from torchvision import transforms
 
 ROOT_DIR = Path(__file__).parents[1]
-DATA_DIR = ROOT_DIR.joinpath('data')
+DATA_DIR = ROOT_DIR.joinpath('data', 'mvtec_ad', 'bottle')
 
-class CosmeDataset(Dataset):
+class MVTecDataset(Dataset):
     def __init__(self, data_dir: Path, phase: str = 'train'):
         super().__init__()
+        ImageFile.LOAD_TRUNCATED_IMAGES = True  # PILが大きなイメージをロードしない仕様のため
         self.data_dir = data_dir
-        if phase == 'train':
-            ext = '.jpg'
-        elif phase == 'val':
-            ext = '.png'
         self.phase = phase
-        self.img_list = list(self.data_dir.joinpath(self.phase).glob(f'*{ext}'))
+
+        self.img_list = list(self.data_dir.joinpath(self.phase).glob(f'*.png'))
 
         self.transforms = transforms.Compose([
             transforms.Resize(size=(256, 256)),
@@ -29,16 +27,12 @@ class CosmeDataset(Dataset):
     def __getitem__(self, idx: int) -> torch.Tensor:
         img_path = self.img_list[idx]
         img_pil = Image.open(img_path).convert('RGB')
-        return self.transforms(img_pil), torch.randn(1), torch.randn(1), torch.randn(1)
+        return self.transforms(img_pil)
 
     def __len__(self):
         return len(self.img_list)
 
-
-class MVTecDataset(Dataset):
-    def __init__(self):
-        super().__init__()
-
 if __name__ == '__main__':
-    dataset = CosmeDataset(data_dir=DATA_DIR, phase='train')
-    print(iter(dataset).__next__().shape)
+    dataset = MVTecDataset(data_dir=DATA_DIR, phase='train/good')
+    print(f'Dataset Size: {len(dataset)}')
+    print(f'Data Shape: {iter(dataset).__next__().shape}')

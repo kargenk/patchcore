@@ -9,22 +9,25 @@ import torch.nn.functional as F
 from scipy.ndimage import gaussian_filter
 from sklearn.neighbors import NearestNeighbors
 from sklearn.random_projection import SparseRandomProjection
-from torchvision.models import resnet50
+from torchvision.models import ResNet50_Weights, resnet50
 from torchvision.models.feature_extraction import create_feature_extractor
 
 from plot_utils import inv_transform, save_anomaly_map
 from sampler import KCenterGreedy
 
 ROOT_DIR = Path(__file__).parents[1]
+MODEL_DIR = ROOT_DIR.joinpath('models')
+OUTPUT_DIR = ROOT_DIR.joinpath('outputs', 'back')
 
 class PatchCore(nn.Module):
-    def __init__(self, device = 'cpu'):
+    def __init__(self, device = 'cpu', file_name: str = 'coreset_patch_features.pickle', out_dir: Path = OUTPUT_DIR):
         super().__init__()
         self.device = device
-        self.model = resnet50(pretrained=True)
-        self.extractor = create_feature_extractor(self.model, {'layer2': 'mid1', 'layer3': 'mid2'})
+        self.model = resnet50(weights=ResNet50_Weights.DEFAULT).to(device)
+        self.extractor = create_feature_extractor(self.model, {'layer2': 'mid1', 'layer3': 'mid2'}).to(device)
         self.memory_bank = []
-        self.save_dir = ROOT_DIR.joinpath('outputs')
+        self.save_path = MODEL_DIR.joinpath(file_name)
+        self.out_dir = out_dir
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """特徴抽出を行う
@@ -34,98 +37,82 @@ class PatchCore(nn.Module):
 
         Returns:
             dict[str, torch.Tensor]: 中間特徴量の辞書
+                ex.) ResNet50 - layer2: [N, 512, H/8, W/8], layer3: [N, 1024, H/16, W/16]
         """
         self.feature = self.extractor(x)  # layer2: [N, 512, H/8, W/8], layer3: [N, 1024, H/16, W/16]
         return self.feature
 
-    def reshape_embedding(self, embedding: torch.Tensor) -> list[torch.Tensor]:
-        """N x H x W 個のチャネル方向特徴量のリストを作成.
-
-        Args:
-            embedding (torch.Tensor): torch.Size([N, 1536, H/8, W/8])
-
-        Returns:
-            list[torch.Tensor]: torch.Size([1536])の特徴量がNHW個並んだリスト
-        """
-        # [N, C, H, W] => [N, H, W, C] => [N * H * W, C]
-        emb_flatten = embedding.permute(0, 2, 3, 1).reshape(-1, embedding.shape[1])
-        return emb_flatten
-
-    def emb_concat(self, embeddings:list[torch.Tensor]) -> torch.Tensor:
-        """2つの中間特徴量のうち、小さい方をバイリニア補間でアップサンプリングしてからチャネル方向に結合.
-
-        Args:
-            embeddings (dict[str, torch.Tensor]): 浅くも深くもない位置の中間特徴量二つ
-
-        Returns:
-            torch.Tensor: チャネル方向に結合した中間特徴量
-        """
-        B, C1, H1, W1 = embeddings[0].size()  # torch.Size([N, 512, H/8, W/8])
-        _, C2, H2, W2 = embeddings[1].size()  # torch.Size([N, 1024, H/16, W/16])
-        s = int(H1 / H2)  # 2
-        mid2 = F.interpolate(embeddings[1], scale_factor=s, mode='bilinear')
-        return torch.cat([embeddings[0], mid2], dim=1)
-
-    def add_memory(self, batch) -> None:
+    def add_memory(self, x) -> None:
         """位置毎の特徴量をMemoryBankに格納(バッチごとに処理を行う)
 
         Args:
-            batch (object): 入力のバッチ
+            batch (object): 入力画像[N, C, H, W]
         """
-        x, _, _, _ = batch
         features = self.extractor(x)
 
         # 位置に敏感にならないようにAverage Poolingで周囲と混ぜる（ぼかす）
+        # ref. paper eq(2) and 4.4.1
         embeddings = []
         avg_pool = nn.AvgPool2d(3, 1, 1)
         for _, feature in features.items():
             embeddings.append(avg_pool(feature))
         # 特徴マップを結合
-        embedding = self.emb_concat(embeddings)
+        patch_features = self._emb_concat(embeddings)
         # 位置毎の特徴量を格納
-        embedding = self.reshape_embedding(embedding)
-        self.memory_bank.extend([emb for emb in embedding.tolist()])  # [N * H * W] * C
+        patch_features = self._reshape_embedding(patch_features)
+        self.memory_bank.extend(patch_features.tolist())  # [N * H * W] * C
 
-    def save_memories(self) -> None:
+    def save_memories(self, save_ratio: float = 0.01) -> None:
         """高速化のため、Random Projectionを使用して次元削減後、Greedy法を用いて特徴量のサンプリングを行って保存する.
+
+        Args:
+            save_ratio (float, optional): coresetとして何割の特徴量を保存するか.
+                論文ではMVTecADデータセットにおいては0.01(1%)でも十分な精度. Defaults to 0.01.
         """
-        total_embeddings = np.array(self.memory_bank)
-        # 高速化のため、Random Projectionで次元削減, 'auto' => Johnson-Lindenstrauss lemma
+        patch_features = np.array(self.memory_bank)
+        # 高速化のため、Random Projectionで特徴量の次元を削減, 'auto' => Johnson-Lindenstrauss lemma
         # 高次元のユークリッド空間内の要素をそれぞれの要素間の距離をある程度保ったまま、
         # 別の(低次元の)ユークリッド空間へ線型写像で移せるという補題
-        self.randomprojector = SparseRandomProjection(n_components='auto', eps=0.9)
-        self.randomprojector.fit(total_embeddings)
+        # ref. paper 3.2
+        self.random_projector = SparseRandomProjection(n_components='auto', eps=0.9)
+        self.random_projector.fit(patch_features)
 
         # Greedy法を用いて、特徴量の数をN個選択する
-        selector = KCenterGreedy(total_embeddings, 0, 0)
-        selected_idx = selector.select_batch(model=self.randomprojector, already_selected=[], N=int(total_embeddings.shape[0] * 0.001))
-        self.embedding_coreset = total_embeddings[selected_idx]
-        print('initial embedding size : ', total_embeddings.shape)      # (245760, 1536)
-        print('final embedding size : ', self.embedding_coreset.shape)  # (245, 1536)
+        selector = KCenterGreedy(patch_features, 0, 0)
+        selected_idx = selector.select_samples(
+            model=self.random_projector,
+            already_selected=[],
+            n=int(patch_features.shape[0] * save_ratio)
+        )
+        self.memory_bank_coreset = patch_features[selected_idx]
+        print('full memory bank size : ', patch_features.shape)               # (245760, 1536)
+        print('coreset memory bank size : ', self.memory_bank_coreset.shape)  # (245, 1536)
 
         # 特徴量の保存
-        with self.save_dir.joinpath('embedding.pickle').open('wb') as f:
-            pickle.dump(self.embedding_coreset, f)
+        with self.save_path.open('wb') as f:
+            pickle.dump(self.memory_bank_coreset, f)
 
-    def inference(self, batch, batch_idx):
-        x, gt, label, x_type = batch
+    def inference(self, x, batch_idx):
         # 正常画像の特徴量を読み込む
-        with self.save_dir.joinpath('embedding.pickle').open('rb') as f:
-            self.embedding_coreset = pickle.load(f)
+        with self.save_path.open('rb') as f:
+            self.memory_bank_coreset = pickle.load(f)
         # テスト画像の特徴量を計算
         features = self.extractor(x)
         embeddings = []
         for _, feature in features.items():
             m = nn.AvgPool2d(3, 1, 1)
-            embeddings.append(m(feature.cpu()))
-        # 特徴マップを結合
-        embedding = self.emb_concat(embeddings)
-        # 位置毎の特徴量を格納
-        embedding = self.reshape_embedding(embedding.detach().numpy())
+            embeddings.append(m(feature))
+        patch_features = self._emb_concat(embeddings)
+        patch_features = self._reshape_embedding(patch_features)
 
         # k近傍法で最も近い特徴量をn_neighbors個探索する
-        nbrs = NearestNeighbors(n_neighbors=9, algorithm='ball_tree', metric='minkowski', p=2).fit(self.embedding_coreset)
-        score_patches, _ = nbrs.kneighbors(embedding)  # 正解特徴量との距離(特徴マップ32x32=1024, 近傍特徴量n_neighbors)
+        nbrs = NearestNeighbors(
+            n_neighbors=9,
+            algorithm='ball_tree',
+            metric='minkowski',
+            p=2).fit(self.memory_bank_coreset)
+        # 正常特徴量との距離(特徴マップ32x32=1024, 近傍特徴量n_neighbors)
+        score_patches, _ = nbrs.kneighbors(patch_features.cpu().detach().numpy())
         anomaly_map = score_patches[:, 0].reshape((32, 32))
 
         # 画像レベルの異常度を計算
@@ -134,24 +121,49 @@ class PatchCore(nn.Module):
         scores = w * max(score_patches[:, 0])
 
         # 異常マップをリサイズ
-        gt_np = gt.cpu().numpy()[0,0].astype(int)
         anomaly_map_resized = cv2.resize(anomaly_map, (254, 254))
         anomaly_map_resized_blur = gaussian_filter(anomaly_map_resized, sigma=4)
 
-        self.gt_list_px_lvl.extend(gt_np.ravel())
-        self.pred_list_px_lvl.extend(anomaly_map_resized_blur.ravel())
-        self.gt_list_img_lvl.append(label.cpu().numpy()[0])
-        self.pred_list_img_lvl.append(scores)
-
         # 画像の保存
-        x = inv_transform(x, self.cfg.imdata.inv_img_mean, self.cfg.imdata.inv_img_std)
+        imagenet_inv_mean = [-0.485 / 0.229, -0.456 / 0.224, -0.406 / 0.255]
+        imagenet_inv_std = [1.0 / 0.229, 1.0 / 0.224, 1.0 / 0.255]
+        x = inv_transform(x, imagenet_inv_mean, imagenet_inv_std)
         input_x = cv2.cvtColor(x.permute(0, 2, 3, 1).cpu().numpy()[0] * 255, cv2.COLOR_BGR2RGB)
         file_name = f'{batch_idx :05d}'
-        save_anomaly_map(self.save_dir, anomaly_map_resized_blur, input_x, gt_np * 255, file_name, x_type[0])
+        save_anomaly_map(self.out_dir, anomaly_map_resized_blur, input_x, file_name)
+
+    def _emb_concat(self, embeddings:list[torch.Tensor]) -> torch.Tensor:
+        """2つの中間特徴量のうち、サイズの小さい方をバイリニア補間でアップサンプリングしてからチャネル方向に結合.
+
+        Args:
+            embeddings (dict[str, torch.Tensor]): 浅くも深くもない位置の中間特徴量二つ
+
+        Returns:
+            torch.Tensor: チャネル方向に結合した中間特徴量
+        """
+        h1 = embeddings[0].size()[2]  # torch.Size([N, 512, H/8, W/8])
+        h2 = embeddings[1].size()[2]  # torch.Size([N, 1024, H/16, W/16])
+        s = int(h1 / h2)  # 2
+        mid2 = F.interpolate(embeddings[1], scale_factor=s, mode='bilinear')
+        return torch.cat([embeddings[0], mid2], dim=1)
+
+    def _reshape_embedding(self, embedding: torch.Tensor) -> list[torch.Tensor]:
+        """N x H x W 個のチャネル方向特徴量（パッチ特徴量）のリストを作成.
+
+        Args:
+            embedding (torch.Tensor): torch.Size([N, 1536, H/8, W/8])
+
+        Returns:
+            list[torch.Tensor]: torch.Size([1536])の特徴量がNHW個並んだリスト[num_patch, filters]
+        """
+        # [N, C, H, W] => [N, H, W, C] => [N * H * W, C]
+        patch_features = embedding.permute(0, 2, 3, 1).reshape(-1, embedding.shape[1])
+        return patch_features
+
 
 if __name__ == '__main__':
     dummy = torch.randn((8, 3, 256, 256))
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     patchcore = PatchCore(device=device)
-    print(patchcore.add_memory((dummy, None, None, None)))
-    print(len(patchcore.memory_bank))
+    patchcore.add_memory(dummy.to(device))
+    patchcore.save_memories()

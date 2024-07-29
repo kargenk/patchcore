@@ -11,11 +11,11 @@ def inv_transform(x: torch.Tensor, inv_mean: list[float], inv_std: list[float]) 
 
     Args:
         x (torch.Tensor): 正規化された画像テンソル
-        inv_mean (List[float]): [-0.485/0.229, -0.456/0.224, -0.406/0.255]
-        inv_std (List[float]): [1/0.229, 1/0.224, 1/0.255]
+        inv_mean (List[float]): ImageNetの場合、[-0.485/0.229, -0.456/0.224, -0.406/0.255]
+        inv_std (List[float]): ImageNetの場合、[1/0.229, 1/0.224, 1/0.255]
 
     Returns:
-        torch.Tensor: _description_
+        torch.Tensor: [0.0, 1.0]から[0, 255]に戻した画像
     """
     return transforms.Normalize(
         mean=inv_mean, std=inv_std
@@ -32,7 +32,7 @@ def heatmap_on_image(heatmap: np.ndarray, image: np.ndarray):
     out = out / np.max(out)
     return np.uint8(255 * out)
 
-def save_anomaly_map(save_dir, anomaly_map, input_img, gt_img, file_name, x_type, norm_max=3):
+def save_anomaly_map(save_dir, anomaly_map, input_img, file_name, norm_max=3):
     if anomaly_map.shape != input_img.shape:
         anomaly_map = cv2.resize(anomaly_map, (input_img.shape[0], input_img.shape[1]))
     print(f'ano map min: {anomaly_map.min()} max: {anomaly_map.max()} in {file_name}')
@@ -47,8 +47,7 @@ def save_anomaly_map(save_dir, anomaly_map, input_img, gt_img, file_name, x_type
     # save images
     save_dir = Path(save_dir)
     save_dir.mkdir(exist_ok=True, parents=True)
-    print(str(save_dir / f'{x_type}_{file_name}.png'))
-    cv2.imwrite(str(save_dir / f'{x_type}_{file_name}.png'), input_img)
-    cv2.imwrite(str(save_dir / f'{x_type}_{file_name}_amap.png'), anomaly_map_norm_hm)
-    cv2.imwrite(str(save_dir / f'{x_type}_{file_name}_amap_on_img.png'), hm_on_img)
-    cv2.imwrite(str(save_dir / f'{x_type}_{file_name}_gt.png'), gt_img)
+    print(str(save_dir / f'{file_name}.png'))
+    cv2.imwrite(str(save_dir / f'{file_name}.png'), input_img)
+    cv2.imwrite(str(save_dir / f'{file_name}_amap.png'), anomaly_map_norm_hm)
+    cv2.imwrite(str(save_dir / f'{file_name}_amap_on_img.png'), hm_on_img)
