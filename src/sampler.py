@@ -3,10 +3,11 @@ from sklearn.metrics import pairwise_distances
 from tqdm import tqdm
 
 
-class KCenterGreedy():
+class KCenterGreedy:
     """Greedy法による特徴量選択
-        選択した点から最も遠いものから順に選択対象としていく
+    選択した点から最も遠いものから順に選択対象としていく
     """
+
     def __init__(self, X, y, seed, metric='euclidean'):
         self.X = X
         self.y = y
@@ -54,3 +55,7 @@ class KCenterGreedy():
         self.already_selected = already_selected
 
         return sample_indices
+
+
+# class GreedyCoresetSampler:
+#     def __init__(self,)

@@ -5,8 +5,11 @@ from PIL import Image, ImageFile
 from torch.utils.data import Dataset
 from torchvision import transforms
 
+from plot_utils import restore_image
+
 ROOT_DIR = Path(__file__).parents[1]
 DATA_DIR = ROOT_DIR.joinpath('data', 'mvtec_ad', 'bottle')
+
 
 class MVTecDataset(Dataset):
     def __init__(self, data_dir: Path, phase: str = 'train'):
@@ -17,22 +20,30 @@ class MVTecDataset(Dataset):
 
         self.img_list = list(self.data_dir.joinpath(self.phase).glob(f'*.png'))
 
-        self.transforms = transforms.Compose([
-            transforms.Resize(size=(256, 256)),
-            transforms.PILToTensor(),
-            transforms.ConvertImageDtype(torch.float),
-            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
-        ])
+        self.transforms = transforms.Compose(
+            [
+                transforms.Resize(size=(256, 256)),
+                transforms.PILToTensor(),
+                transforms.ConvertImageDtype(torch.float),
+                transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+            ]
+        )
 
     def __getitem__(self, idx: int) -> torch.Tensor:
         img_path = self.img_list[idx]
         img_pil = Image.open(img_path).convert('RGB')
-        return self.transforms(img_pil)
+        return self.transforms(img_pil), str(img_path)
 
     def __len__(self):
         return len(self.img_list)
 
+
 if __name__ == '__main__':
     dataset = MVTecDataset(data_dir=DATA_DIR, phase='train/good')
+    img_tensor, img_path = iter(dataset).__next__()
     print(f'Dataset Size: {len(dataset)}')
-    print(f'Data Shape: {iter(dataset).__next__().shape}')
+    print(img_path)
+    print(f'Data Shape: {img_tensor.shape}')
+
+    # 画像表示（デバッグ用）
+    img_arr = restore_image(img_tensor, show=True)
