@@ -59,7 +59,7 @@ def make_heatmap(gray: np.ndarray) -> np.ndarray:
     return heatmap
 
 
-def synthesis(heatmap: np.ndarray, image: np.ndarray) -> np.ndarray:
+def overlay_heatmap(heatmap: np.ndarray, image: np.ndarray) -> np.ndarray:
     """ヒートマップを入力画像に重ね合わせて返す.
 
     Args:
@@ -106,7 +106,7 @@ def save_anomaly_map(save_dir: Path, anomaly_map: np.ndarray, input_img: np.ndar
 
     # 異常箇所をヒートマップとして元画像に重ね合わせる
     anomaly_heatmap = make_heatmap(anomaly_map_norm * 255)
-    hm_on_img = synthesis(anomaly_heatmap, input_img)
+    hm_on_img = overlay_heatmap(anomaly_heatmap, input_img)
 
     # オリジナル/ヒートマップ/重ね合わせ画像を保存
     save_dir = Path(save_dir)
