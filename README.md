@@ -96,6 +96,13 @@ Write usage of this repository
 <!-- ![calculation Time](api/img/calculation_time.png) -->
 
 ## 🚀Updates
+**2024.07.31**
+
+- support MVTecAD dataset
+
+**2024.07.29**
+
+- add segmentation
 
 **2024.06.03**
 

@@ -7,7 +7,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from scipy.ndimage import gaussian_filter
-from sklearn.neighbors import NearestNeighbors
 from sklearn.random_projection import SparseRandomProjection
 from torchvision.models import ResNet50_Weights, resnet50
 from torchvision.models.feature_extraction import create_feature_extractor
@@ -83,27 +82,34 @@ class PatchCore(nn.Module):
     def inference(self, img_tensor, batch_idx):
         # 正常画像の特徴量を読み込む
         with self.save_path.open('rb') as f:
-            self.memory_bank_coreset = pickle.load(f)
+            self.memory_bank_coreset = pickle.load(f)  # M, Size=[num_coreset, feature_dim]
+            memory_bank_coreset = torch.from_numpy(self.memory_bank_coreset).to(self.device)
         # テスト画像の特徴量を計算
-        patch_features = self.patchify(img_tensor)
+        patch_features = self.patchify(img_tensor)  # P(x^test), Size=[N*H*W=1024, feature_dim=1536]
 
-        # k近傍法で最も近い正常特徴量(次元数: 32x32 = 1024)をn_neighbors個探索する
-        nbrs = NearestNeighbors(n_neighbors=9, algorithm='ball_tree', metric='minkowski', p=2).fit(
-            self.memory_bank_coreset
-        )
-        score_patches, _ = nbrs.kneighbors(patch_features.cpu().detach().numpy())
-        anomaly_map = score_patches[:, 0].reshape((32, 32))
-        print(anomaly_map)
-        raise ValueError
+        # memo: dist[0]はpatch0からcoreset全てに対する距離を表す
+        dist = torch.cdist(patch_features, memory_bank_coreset)  # [patch, coreset]
+        min_dist, min_idx = torch.min(dist, dim=1)  # テストパッチ毎にcoresetの中で最も距離が近いものを取得
+        s_idx = torch.argmax(min_dist)
+        s_star = torch.max(min_dist)
 
-        # 画像レベルの異常度を計算
-        N_b = score_patches[np.argmax(score_patches[:, 0])]
-        w = 1 - (np.max(np.exp(N_b)) / np.sum(np.exp(N_b)))
-        scores = w * max(score_patches[:, 0])
+        # ref. paper eq(6)
+        m_test = patch_features[s_idx].unsqueeze(0)  # 異常パッチ（メモリバンク内の正常パッチ特徴から最も距離が遠いもの）
+        m_star = memory_bank_coreset[min_idx[s_idx]].unsqueeze(0)  # メモリバンク内の最近傍のパッチ特徴
+        weight_dist = torch.cdist(m_star, memory_bank_coreset)
+        _, nn_idx = torch.topk(weight_dist, k=3, largest=False)
 
-        # 異常マップをリサイズ
-        anomaly_map_resized = cv2.resize(anomaly_map, (254, 254))
-        anomaly_map_resized_blur = gaussian_filter(anomaly_map_resized, sigma=4)
+        # ref. paper eq(7)
+        m_star_knn = torch.linalg.norm(m_test - memory_bank_coreset[nn_idx[0, 1:]], dim=1)
+        # Transformerで用いられているテクニックを使用
+        D = torch.sqrt(torch.tensor(patch_features.shape[1]))
+        weight = 1 - (torch.exp(s_star / D) / (torch.sum(torch.exp(m_star_knn / D))))
+        img_level_score = weight * s_star
+
+        # セグメンテーション画像の作成
+        seg_map = min_dist.reshape(32, 32)
+        seg_map_resized = cv2.resize(seg_map.cpu().detach().numpy(), (254, 254))
+        seg_map_resized_blur = gaussian_filter(seg_map_resized, sigma=4)
 
         # 画像の保存
         imagenet_inv_mean = [-0.485 / 0.229, -0.456 / 0.224, -0.406 / 0.255]
@@ -111,7 +117,7 @@ class PatchCore(nn.Module):
         img_origin = inv_transform(img_tensor, imagenet_inv_mean, imagenet_inv_std)
         input_x = cv2.cvtColor(img_origin.permute(0, 2, 3, 1).cpu().numpy()[0] * 255, cv2.COLOR_BGR2RGB)
         file_name = f'{batch_idx :05d}'
-        save_anomaly_map(self.out_dir, anomaly_map_resized_blur, input_x, file_name)
+        save_anomaly_map(self.out_dir, seg_map_resized_blur, input_x, file_name)
 
     @torch.inference_mode()
     def patchify(self, img_tensor: torch.Tensor) -> torch.Tensor:

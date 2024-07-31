@@ -46,35 +46,72 @@ def restore_image(img_tensor: torch.Tensor, show: bool = False) -> np.ndarray:
     return img_arr
 
 
-def cvt2heatmap(gray: np.ndarray):
+def make_heatmap(gray: np.ndarray) -> np.ndarray:
+    """グレースケール画像からヒートマップを作成.
+
+    Args:
+        gray (np.ndarray): グレースケール画像のNumPy配列
+
+    Returns:
+        np.ndarray: ヒートマップ画像
+    """
     heatmap = cv2.applyColorMap(np.uint8(gray), cv2.COLORMAP_JET)
     return heatmap
 
 
-def heatmap_on_image(heatmap: np.ndarray, image: np.ndarray):
-    if heatmap.shape != image.shape:
-        heatmap = cv2.resize(heatmap, (image.shape[0], image.shape[1]))
-    out = np.float32(heatmap) / 255 + np.float32(image) / 255
-    out = out / np.max(out)
-    return np.uint8(255 * out)
+def synthesis(heatmap: np.ndarray, image: np.ndarray) -> np.ndarray:
+    """ヒートマップを入力画像に重ね合わせて返す.
+
+    Args:
+        heatmap (np.ndarray): ヒートマップ画像
+        image (np.ndarray): 元画像
+
+    Returns:
+        np.ndarray: ヒートマップを重ね合わせた画像
+    """
+    res = np.float32(heatmap) / 255 + np.float32(image) / 255
+    res = res / np.max(res)
+    return np.uint8(255 * res)
 
 
-def save_anomaly_map(save_dir, anomaly_map, input_img, file_name, norm_max=3):
+def min_max_normalize(image: np.ndarray) -> np.ndarray:
+    """グレースケール画像をmin-max正規化して返す.
+
+    Args:
+        image (np.ndarray): 画像のNumPy配列Shape=[H, W], [-∞, ∞]
+
+    Returns:
+        np.ndarray: 正規化した画像[0, 1]
+    """
+    _min, _max = image.min(), image.max()
+    normalized = (image - _min) / (_max - _min)
+    return normalized
+
+
+def save_anomaly_map(save_dir: Path, anomaly_map: np.ndarray, input_img: np.ndarray, file_name: str) -> None:
+    """オリジナル/ヒートマップ/重ね合わせ画像を保存
+
+    Args:
+        save_dir (Path): 保存先のディレクトリ
+        anomaly_map (np.ndarray): 異常箇所のセグメンテーション画像(グレースケール)
+        input_img (np.ndarray): 入力画像(RGB)
+        file_name (str): 保存ファイル名
+    """
     if anomaly_map.shape != input_img.shape:
         anomaly_map = cv2.resize(anomaly_map, (input_img.shape[0], input_img.shape[1]))
-    print(f'ano map min: {anomaly_map.min()} max: {anomaly_map.max()} in {file_name}')
-    anomaly_map[anomaly_map > norm_max] = norm_max
-    anomaly_map_norm = (anomaly_map - anomaly_map.min()) / norm_max
-    anomaly_map_norm_hm = cvt2heatmap(anomaly_map_norm * 255)
 
-    # anomaly map on image
-    heatmap = cvt2heatmap(anomaly_map_norm * 255)
-    hm_on_img = heatmap_on_image(heatmap, input_img)
+    # 異常箇所の正規化
+    anomaly_map_norm = min_max_normalize(anomaly_map)
+    # print(f'ano map min: {anomaly_map.min()} max: {anomaly_map.max()} in {file_name}')
 
-    # save images
+    # 異常箇所をヒートマップとして元画像に重ね合わせる
+    anomaly_heatmap = make_heatmap(anomaly_map_norm * 255)
+    hm_on_img = synthesis(anomaly_heatmap, input_img)
+
+    # オリジナル/ヒートマップ/重ね合わせ画像を保存
     save_dir = Path(save_dir)
     save_dir.mkdir(exist_ok=True, parents=True)
     print(str(save_dir / f'{file_name}.png'))
     cv2.imwrite(str(save_dir / f'{file_name}.png'), input_img)
-    cv2.imwrite(str(save_dir / f'{file_name}_amap.png'), anomaly_map_norm_hm)
+    cv2.imwrite(str(save_dir / f'{file_name}_amap.png'), anomaly_heatmap)
     cv2.imwrite(str(save_dir / f'{file_name}_amap_on_img.png'), hm_on_img)
