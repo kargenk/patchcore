@@ -20,14 +20,17 @@ OUTPUT_DIR = ROOT_DIR.joinpath('outputs', 'back')
 
 
 class PatchCore(nn.Module):
-    def __init__(self, device='cpu', file_name: str = 'coreset_patch_features.pickle', out_dir: Path = OUTPUT_DIR):
+    def __init__(self, threshold: int,
+                 device='cpu', file_name: str = 'coreset_patch_features.pickle', out_dir: Path = OUTPUT_DIR):  # fmt: skip
         super().__init__()
         self.device = device
         self.model = resnet50(weights=ResNet50_Weights.DEFAULT).to(device)
         self.extractor = create_feature_extractor(self.model, {'layer2': 'mid1', 'layer3': 'mid2'}).to(device)
+        self.resolution = None  # [H, W]
         self.memory_bank = []
         self.save_path = MODEL_DIR.joinpath(file_name)
         self.out_dir = out_dir
+        self.threshold = threshold
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """特徴抽出を行う
@@ -79,7 +82,14 @@ class PatchCore(nn.Module):
         with self.save_path.open('wb') as f:
             pickle.dump(self.memory_bank_coreset, f)
 
-    def inference(self, img_tensor, batch_idx):
+    def inference(self, img_tensor: torch.Tensor, batch_idx: int) -> None:
+        """正常特徴量を元に以上スコアを計算し，ヒートマップとして元の画像に重ねて画像として保存する.
+        （注意）画像一枚に対する推論にのみ対応.
+
+        Args:
+            img_tensor (torch.Tensor): 画像. Size=[1, C, H, W]
+            batch_idx (int): 連番のファイル名として使用する
+        """
         # 正常画像の特徴量を読み込む
         with self.save_path.open('rb') as f:
             self.memory_bank_coreset = pickle.load(f)  # M, Size=[num_coreset, feature_dim]
@@ -89,13 +99,16 @@ class PatchCore(nn.Module):
 
         # memo: dist[0]はpatch0からcoreset全てに対する距離を表す
         dist = torch.cdist(patch_features, memory_bank_coreset)  # [patch, coreset]
-        min_dist, min_idx = torch.min(dist, dim=1)  # テストパッチ毎にcoresetの中で最も距離が近いものを取得
+        # テストパッチ毎にcoresetの中で最も距離が近いものを取得
+        min_dist, min_idx = torch.min(dist, dim=1)
         s_idx = torch.argmax(min_dist)
         s_star = torch.max(min_dist)
 
         # ref. paper eq(6)
-        m_test = patch_features[s_idx].unsqueeze(0)  # 異常パッチ（メモリバンク内の正常パッチ特徴から最も距離が遠いもの）
-        m_star = memory_bank_coreset[min_idx[s_idx]].unsqueeze(0)  # メモリバンク内の最近傍のパッチ特徴
+        # m_test: 異常パッチ（メモリバンク内の正常パッチ特徴から最も距離が遠いもの）
+        # m_star: # メモリバンク内の最近傍のパッチ特徴
+        m_test = patch_features[s_idx].unsqueeze(0)
+        m_star = memory_bank_coreset[min_idx[s_idx]].unsqueeze(0)
         weight_dist = torch.cdist(m_star, memory_bank_coreset)
         _, nn_idx = torch.topk(weight_dist, k=3, largest=False)
 
@@ -107,7 +120,7 @@ class PatchCore(nn.Module):
         img_level_score = weight * s_star
 
         # セグメンテーション画像の作成
-        seg_map = min_dist.reshape(32, 32)
+        seg_map = min_dist.reshape(self.resolution)  # ResNet50 -> [32, 32]
         seg_map_resized = cv2.resize(seg_map.cpu().detach().numpy(), (254, 254))
         seg_map_resized_blur = gaussian_filter(seg_map_resized, sigma=4)
 
@@ -117,7 +130,7 @@ class PatchCore(nn.Module):
         img_origin = inv_transform(img_tensor, imagenet_inv_mean, imagenet_inv_std)
         input_x = cv2.cvtColor(img_origin.permute(0, 2, 3, 1).cpu().numpy()[0] * 255, cv2.COLOR_BGR2RGB)
         file_name = f'{batch_idx :05d}'
-        save_anomaly_map(self.out_dir, seg_map_resized_blur, input_x, file_name)
+        save_anomaly_map(self.out_dir, seg_map_resized_blur, input_x, self.threshold, file_name)
 
     @torch.inference_mode()
     def patchify(self, img_tensor: torch.Tensor) -> torch.Tensor:
@@ -130,6 +143,8 @@ class PatchCore(nn.Module):
             torch.Tensor: 入力画像のパッチ特徴量[N*H*W, C]
         """
         features = self.extractor(img_tensor)
+        self.resolution = features['mid1'].size()[-2:]
+
         # 位置に敏感にならないようにAverage Poolingで周囲と混ぜる（ぼかす）
         # ref. paper eq(2) and 4.4.1
         embeddings = []

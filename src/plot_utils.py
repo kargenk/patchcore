@@ -88,30 +88,33 @@ def min_max_normalize(image: np.ndarray) -> np.ndarray:
     return normalized
 
 
-def save_anomaly_map(save_dir: Path, anomaly_map: np.ndarray, input_img: np.ndarray, file_name: str) -> None:
+def save_anomaly_map(save_dir: Path, anomaly_map: np.ndarray, input_img: np.ndarray,
+                     threshold: int, file_name: str) -> None:  # fmt: skip
     """オリジナル/ヒートマップ/重ね合わせ画像を保存
 
     Args:
         save_dir (Path): 保存先のディレクトリ
         anomaly_map (np.ndarray): 異常箇所のセグメンテーション画像(グレースケール)
         input_img (np.ndarray): 入力画像(RGB)
+        threshold (int): 異常スコアを出すかの閾値
         file_name (str): 保存ファイル名
     """
+    # 解像度を合わせる
     if anomaly_map.shape != input_img.shape:
         anomaly_map = cv2.resize(anomaly_map, (input_img.shape[0], input_img.shape[1]))
 
-    # 異常箇所の正規化
+    # 異常スコアを[0, 1]の範囲に正規化してヒートマップとして元画像に重ね合わせる
+    # print(f'ano map min: {anomaly_map.min() :.04f}, ano map ave: {anomaly_map.mean() :.04f}, ano map max: {anomaly_map.max() :.04f}')  # fmt: skip
     anomaly_map_norm = min_max_normalize(anomaly_map)
-    # print(f'ano map min: {anomaly_map.min()} max: {anomaly_map.max()} in {file_name}')
-
-    # 異常箇所をヒートマップとして元画像に重ね合わせる
-    anomaly_heatmap = make_heatmap(anomaly_map_norm * 255)
+    if anomaly_map.mean() > threshold:
+        anomaly_heatmap = make_heatmap(anomaly_map_norm * 255)
+    else:
+        anomaly_heatmap = np.zeros((anomaly_map_norm.shape[0], anomaly_map_norm.shape[1], 3))
     hm_on_img = overlay_heatmap(anomaly_heatmap, input_img)
 
     # オリジナル/ヒートマップ/重ね合わせ画像を保存
     save_dir = Path(save_dir)
     save_dir.mkdir(exist_ok=True, parents=True)
-    print(str(save_dir / f'{file_name}.png'))
     cv2.imwrite(str(save_dir / f'{file_name}.png'), input_img)
     cv2.imwrite(str(save_dir / f'{file_name}_amap.png'), anomaly_heatmap)
     cv2.imwrite(str(save_dir / f'{file_name}_amap_on_img.png'), hm_on_img)
