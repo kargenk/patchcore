@@ -94,6 +94,13 @@ Write usage of this repository
 
 <!-- - processing X takes N \[sec\] to process each image(H x W px). -->
 <!-- ![calculation Time](api/img/calculation_time.png) -->
+- Using ResNet50 as Feature Extractor
+  - resolution: 256x256
+    - It takes N \[hour\] for sampling 1% coreset memorybank. (GPU: A6000, 309 images)
+    - It takes N \[sec\] for inference.
+  - resolution: 512x512
+    - It takes 3 ~ 4 \[hour\] for sampling 1% coreset memorybank. (GPU: A6000, 309 images)
+    - It takes 0.3 \[sec\] for inference. (GPU: A6000, 309 images)
 
 ## 🚀Updates
 **2024.07.31**

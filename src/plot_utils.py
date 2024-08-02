@@ -104,7 +104,7 @@ def save_anomaly_map(save_dir: Path, anomaly_map: np.ndarray, input_img: np.ndar
         anomaly_map = cv2.resize(anomaly_map, (input_img.shape[0], input_img.shape[1]))
 
     # 異常スコアを[0, 1]の範囲に正規化してヒートマップとして元画像に重ね合わせる
-    # print(f'ano map min: {anomaly_map.min() :.04f}, ano map ave: {anomaly_map.mean() :.04f}, ano map max: {anomaly_map.max() :.04f}')  # fmt: skip
+    print(f'ano map min: {anomaly_map.min() :.04f}, ano map ave: {anomaly_map.mean() :.04f}, ano map max: {anomaly_map.max() :.04f}')  # fmt: skip
     anomaly_map_norm = min_max_normalize(anomaly_map)
     if anomaly_map.mean() > threshold:
         anomaly_heatmap = make_heatmap(anomaly_map_norm * 255)
