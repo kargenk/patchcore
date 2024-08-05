@@ -103,6 +103,11 @@ Write usage of this repository
     - It takes 0.3 \[sec\] for inference. (GPU: A6000, 309 images)
 
 ## 🚀Updates
+**2024.08.05**
+
+- add Unfold functions
+  - If the size of the input image is large and the anomaly area is small, resizing it smaller may result in loss of features. To address this problem, I added a process that divides the input image into patches in advance. (at dataset.py - Unfold Class and unfold_collate)
+
 **2024.07.31**
 
 - support MVTecAD dataset
