@@ -2,6 +2,8 @@
 
 This repository is one of the PatchCore implementations.
 
+![kintsugi/input](outputs/kintsugi/image/00000.png)![kintsugi/result](outputs/kintsugi/image/00000_amap_on_img.png)![kintsugi/heatmap](outputs/kintsugi/image/00000_amap.png)
+
 ## 🛠Requirements
 
 - python = "^3.10"
@@ -13,14 +15,17 @@ This repository is one of the PatchCore implementations.
 - scipy = "^1.13.1"
 - pillow = "^10.3.0"
 - tqdm = "^4.66.4"
+- matplotlib = "^3.9.1"
+- pyqt6 = "^6.7.1"
 
 ## 🌲Directory
 
 <pre>
-project_template
+patchcore
 ├─── data
-│       ├── train  : 訓練データ
-│       └── test   : pdfデータと変換したpngのデータ(必要な場合)
+│       └── kintsugi   : データセット
+│             ├── anomaly  : 異常画像（inference用）
+│             └── normal   : 正常画像（train用）
 │
 ├─── environments  : Dockerfileなどの実行環境
 │
@@ -65,7 +70,13 @@ poetry install
 
 ## 💻Usage
 
-Write usage of this repository
+Edit image size, coreset size, threshold, and filepath at `main.py`.
+Then, execute following command.
+
+```bash
+# make Memorybank (train) and Inference
+python main.py
+```
 
 <!-- > [!WARNING]
 > This is warnings -->
@@ -97,11 +108,14 @@ Write usage of this repository
 
 - Using ResNet50 as Feature Extractor
   - resolution: 256x256
-    - It takes N \[hour\] for sampling 1% coreset memorybank. (GPU: A6000, 309 images)
+    - It takes N \[hour\] for sampling 1% coreset memorybank. (309 images)
     - It takes N \[sec\] for inference.
   - resolution: 512x512
-    - It takes 3 ~ 4 \[hour\] for sampling 1% coreset memorybank. (GPU: A6000, 309 images)
-    - It takes 0.3 \[sec\] for inference. (GPU: A6000, 309 images)
+    - It takes 3 ~ 4 \[hour\] for sampling 1% coreset memorybank. (309 images)
+    - It takes 0.3 \[sec\] for inference. (GPU: RTX 3080 Ti, batchsize = 1)
+  - resolution: 1024x1024
+    - It takes 20/92 \[minutes\] for sampling 10%/50% coreset memorybank. (10 images)
+    - It takes 0.75 \[sec\] for inference. (GPU: RTX 3080 Ti, batchsize = 1)
 
 ## 🚀Updates
 
