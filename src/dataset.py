@@ -27,6 +27,7 @@ class MVTecDataset(Dataset):
             # 入力画像をパッチできれいに分けられるサイズに拡大するための拡大係数
             scale_factor = int(max(self.img_size) / self.size) + 1
             up_size = self.size * scale_factor
+            up_size = 768
 
             self.transforms = transforms.Compose(
                 [
@@ -55,9 +56,10 @@ class MVTecDataset(Dataset):
     def __len__(self):
         return len(self.img_list)
 
+
 class Unfold:
-    """入力画像をパッチ化する変換.Input Size=[N, C, H, W]
-    """
+    """入力画像をパッチ化する変換.Input Size=[N, C, H, W]"""
+
     def __init__(self, size: int) -> None:
         self.size = size
 
@@ -68,6 +70,7 @@ class Unfold:
         # [N, C, H//kernel, W//kernel, kernel, kernel] -> [N * H//kernel * W//kernel, C, kernel, kernel]
         patches = patches.permute(0, 2, 3, 1, 4, 5).reshape(-1, 3, self.size, self.size)
         return patches
+
 
 def _default_collate_fn(batch: list[tuple[torch.Tensor], tuple[str]]) -> tuple[torch.Tensor, tuple[str]]:
     """デフォルトのcollate_fn(バッチ化関数).
@@ -82,6 +85,7 @@ def _default_collate_fn(batch: list[tuple[torch.Tensor], tuple[str]]) -> tuple[t
     images = torch.stack(images)
     return images, imgs_path
 
+
 def unfold_collate(batch: list[tuple[torch.Tensor], tuple[str]]) -> tuple[torch.Tensor, tuple[str]]:
     """入力画像をunfoldする場合のcollate_fn(バッチ化関数).
 
@@ -95,18 +99,20 @@ def unfold_collate(batch: list[tuple[torch.Tensor], tuple[str]]) -> tuple[torch.
     images = torch.cat(images, dim=0)
     return images, imgs_path
 
+
 if __name__ == '__main__':
     dataset = MVTecDataset(data_dir=DATA_DIR, phase='train/good', size=256, unfold=False)
     img_tensor, img_path = iter(dataset).__next__()
     print(f'Dataset Size: {len(dataset)}')
     print(f'Data Shape: {img_tensor.shape}')
     print(img_path)
-
     # # 画像表示（デバッグ用）
-    # img_arr = restore_image(img_tensor, show=False)
+    # img_arr = restore_image(img_tensor, show=True)
 
     # 入力画像が大きく、異常が小さい場合
     unfold_dataset = MVTecDataset(data_dir=DATA_DIR, phase='train/good', size=256, unfold=True)
     unfold_dataloader = DataLoader(unfold_dataset, batch_size=1, collate_fn=unfold_collate)
     unfold_img_tensor, unfold_img_path = unfold_dataloader.__iter__().__next__()
     print(f'Batch Shape: {unfold_img_tensor.shape}')
+    # # 画像表示（デバッグ用）
+    # img_arr = restore_image(unfold_img_tensor[0].squeeze(), show=True)

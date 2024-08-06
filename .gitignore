@@ -161,6 +161,9 @@ cython_debug/
 
 data/*
 !data/kintsugi
+data/kintsugi/video
+data/kintsugi/image/splitted
 models/*
 outputs/*
 !outputs/kintsugi
+outputs/kintsugi/image/splitted

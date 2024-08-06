@@ -83,7 +83,7 @@ Write usage of this repository
 - OS: Ubuntu 22.04.4 LTS
 - CPU: AMD Ryzen 7 5700G with Radeon Graphics (8 Core 16 Threads)
 - GPU: GeForce RTX 3080 Ti (12GB)
-- Memory: 16GB
+- Memory: 16x2 GB
 
 <!-- OS: lsb_release -a -->
 <!-- CPU: lscpu -->
@@ -94,6 +94,7 @@ Write usage of this repository
 
 <!-- - processing X takes N \[sec\] to process each image(H x W px). -->
 <!-- ![calculation Time](api/img/calculation_time.png) -->
+
 - Using ResNet50 as Feature Extractor
   - resolution: 256x256
     - It takes N \[hour\] for sampling 1% coreset memorybank. (GPU: A6000, 309 images)
@@ -103,10 +104,15 @@ Write usage of this repository
     - It takes 0.3 \[sec\] for inference. (GPU: A6000, 309 images)
 
 ## 🚀Updates
-**2024.08.05**
 
-- add Unfold functions
-  - If the size of the input image is large and the anomaly area is small, resizing it smaller may result in loss of features. To address this problem, I added a process that divides the input image into patches in advance. (at dataset.py - Unfold Class and unfold_collate)
+**2024.08.06**
+
+- add split image script
+
+<!-- **2024.08.05**
+
+- add Unfold functions(still bugs)
+  - If the size of the input image is large and the anomaly area is small, resizing it smaller may result in loss of features. To address this problem, I added a process that divides the input image into patches in advance. (at dataset.py - Unfold Class and unfold_collate) -->
 
 **2024.07.31**
 

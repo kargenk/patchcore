@@ -1,5 +1,6 @@
 import pickle
 from pathlib import Path
+from typing import Union
 
 import cv2
 import numpy as np
@@ -21,12 +22,13 @@ OUTPUT_DIR = ROOT_DIR.joinpath('outputs', 'back')
 
 class PatchCore(nn.Module):
     def __init__(self, threshold: int,
-                 device='cpu', file_name: str = 'coreset_patch_features.pickle', out_dir: Path = OUTPUT_DIR):  # fmt: skip
+                 device='cpu', file_name: str = 'coreset_patch_features.pickle', out_dir: Path = OUTPUT_DIR, unfold: bool = False):  # fmt: skip
         super().__init__()
         self.device = device
         self.model = resnet50(weights=ResNet50_Weights.DEFAULT).to(device)
         self.extractor = create_feature_extractor(self.model, {'layer2': 'mid1', 'layer3': 'mid2'}).to(device)
-        self.resolution = None  # [H, W]
+        self.size = None  # [H, W]
+        self.unfold = unfold
         self.memory_bank = []
         self.save_path = MODEL_DIR.joinpath(file_name)
         self.out_dir = out_dir
@@ -82,13 +84,13 @@ class PatchCore(nn.Module):
         with self.save_path.open('wb') as f:
             pickle.dump(self.memory_bank_coreset, f)
 
-    def inference(self, img_tensor: torch.Tensor, batch_idx: int) -> None:
+    def inference(self, img_tensor: torch.Tensor, file_name: Union[int, str]) -> None:
         """正常特徴量を元に以上スコアを計算し，ヒートマップとして元の画像に重ねて画像として保存する.
         （注意）画像一枚に対する推論にのみ対応.
 
         Args:
             img_tensor (torch.Tensor): 画像. Size=[1, C, H, W]
-            batch_idx (int): 連番のファイル名として使用する
+            file_name (Union[int, str]): ファイル名として使用する
         """
         # 正常画像の特徴量を読み込む
         with self.save_path.open('rb') as f:
@@ -120,7 +122,7 @@ class PatchCore(nn.Module):
         img_level_score = weight * s_star
 
         # セグメンテーション画像の作成
-        seg_map = min_dist.reshape(self.resolution)  # ResNet50 -> [32, 32]
+        seg_map = min_dist.reshape(self.size)  # ResNet50 -> [32, 32]
         seg_map_resized = cv2.resize(seg_map.cpu().detach().numpy(), (254, 254))
         seg_map_resized_blur = gaussian_filter(seg_map_resized, sigma=4)
 
@@ -129,7 +131,12 @@ class PatchCore(nn.Module):
         imagenet_inv_std = [1.0 / 0.229, 1.0 / 0.224, 1.0 / 0.255]
         img_origin = inv_transform(img_tensor, imagenet_inv_mean, imagenet_inv_std)
         input_x = cv2.cvtColor(img_origin.permute(0, 2, 3, 1).cpu().numpy()[0] * 255, cv2.COLOR_BGR2RGB)
-        file_name = f'{batch_idx :05d}'
+        if isinstance(file_name, str):
+            pass
+        elif isinstance(file_name, int):
+            file_name = f'{file_name :05d}'
+        else:
+            raise NotImplementedError
         save_anomaly_map(self.out_dir, seg_map_resized_blur, input_x, self.threshold, file_name)
 
     @torch.inference_mode()
@@ -143,7 +150,13 @@ class PatchCore(nn.Module):
             torch.Tensor: 入力画像のパッチ特徴量[N*H*W, C]
         """
         features = self.extractor(img_tensor)
-        self.resolution = features['mid1'].size()[-2:]
+        if self.unfold:
+            w, h = features['mid1'].size()[-2:]
+            # （注意）画像枚数 < batchsize のときは手動で設定する必要がある
+            num_patches = 3  # np.sqrt(features['mid1'].size()[0])
+            self.size = (w * num_patches, h * num_patches)
+        else:
+            self.size = features['mid1'].size()[-2:]
 
         # 位置に敏感にならないようにAverage Poolingで周囲と混ぜる（ぼかす）
         # ref. paper eq(2) and 4.4.1
