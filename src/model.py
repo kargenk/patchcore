@@ -9,8 +9,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 from scipy.ndimage import gaussian_filter
 from sklearn.random_projection import SparseRandomProjection
-from torchvision.models import ResNet50_Weights, resnet50
-from torchvision.models.feature_extraction import create_feature_extractor
+from torchvision.models import (
+    ConvNeXt_Tiny_Weights,
+    ResNet50_Weights,
+    Wide_ResNet50_2_Weights,
+    convnext_tiny,
+    resnet50,
+    wide_resnet50_2,
+)
+from torchvision.models.feature_extraction import create_feature_extractor, get_graph_node_names
 
 from plot_utils import inv_transform, save_anomaly_map
 from sampler import KCenterGreedy
@@ -21,18 +28,30 @@ OUTPUT_DIR = ROOT_DIR.joinpath('outputs', 'back')
 
 
 class PatchCore(nn.Module):
-    def __init__(self, threshold: int,
+    def __init__(self, threshold: int, model_name: str = 'resnet50',
                  device='cpu', file_name: str = 'coreset_patch_features.pickle', out_dir: Path = OUTPUT_DIR, unfold: bool = False):  # fmt: skip
         super().__init__()
         self.device = device
-        self.model = resnet50(weights=ResNet50_Weights.DEFAULT).to(device)
-        self.extractor = create_feature_extractor(self.model, {'layer2': 'mid1', 'layer3': 'mid2'}).to(device)
         self.size = None  # [H, W]
         self.unfold = unfold
         self.memory_bank = []
         self.save_path = MODEL_DIR.joinpath(file_name)
         self.out_dir = out_dir
         self.threshold = threshold
+
+        match model_name:
+            case 'resnet50':
+                self.model = resnet50(weights=ResNet50_Weights.DEFAULT).to(device)
+                self.extractor = create_feature_extractor(self.model, {'layer2': 'mid1', 'layer3': 'mid2'}).to(device)
+            case 'wide_resnet50':
+                self.model = wide_resnet50_2(weights=Wide_ResNet50_2_Weights.DEFAULT).to(device)
+                self.extractor = create_feature_extractor(self.model, {'layer2': 'mid1', 'layer3': 'mid2'}).to(device)
+            case 'convnext-tiny':
+                self.model = convnext_tiny(weights=ConvNeXt_Tiny_Weights.DEFAULT).to(device)
+                # print(get_graph_node_names(self.model))
+                self.extractor = create_feature_extractor(self.model, {'features.3.2.add': 'mid1', 'features.5.8.add': 'mid2'}).to(device)  # or [features.4.1, features.6.1]
+            case _:
+                raise NotImplementedError
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """特徴抽出を行う
@@ -202,6 +221,6 @@ class PatchCore(nn.Module):
 if __name__ == '__main__':
     dummy = torch.randn((8, 3, 256, 256))
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    patchcore = PatchCore(device=device)
+    patchcore = PatchCore(device=device, threshold=0, model_name='wide_resnet50')
     patchcore.add_memory(dummy.to(device))
     patchcore.save_memories()

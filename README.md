@@ -119,6 +119,10 @@ python main.py
 
 ## 🚀Updates
 
+**2024.08.21**
+
+- support WideResNet50 and ConvNeXt-tuny as Feature Extractor
+
 **2024.08.06**
 
 - add split image script
